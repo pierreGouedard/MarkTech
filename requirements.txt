@@ -1,0 +1,16 @@
+numpy==1.23.0
+scipy==1.9.1
+pandas==1.4.4
+Wave==0.0.2
+pydub==0.25.1
+opensmile==2.4.1
+librosa==0.9.2
+tensorflow==2.10.0
+keras==2.10.0
+xgboost==1.6.2
+sklearn
+sentence-transformers==2.2.2
+matplotlib==3.6.1
+notebook==6.5.1
+wget==3.2
+pytest==7.1.3

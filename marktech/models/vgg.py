@@ -34,7 +34,7 @@ def create_vgg_model(
 
 def transform_image(
         pth_img: Path, model: tf.keras.Model, w: int = 224, h: int = 224, n_frame: int = 10,
-        is_dir: bool = True, regex: re.Pattern = None
+        is_dir: bool = True, regex: str = None
 ) -> np.ndarray:
     """ Transform image data with a given Keras Model.
 
@@ -67,14 +67,12 @@ class ImageLoader:
 
 
 class ImageSeqLoader:
-    regex = r"([0-9]{1,3}_spec\.png)"
+    regex = r"([0-9]{1,3}_example\.png)"
 
-    def __init__(self, n_frame, w, h, regex: re.Pattern = None):
+    def __init__(self, n_frame, w, h, regex: re.Pattern):
         self.n_frame = n_frame
         self.w, self.h = w, h
-
-        if regex is not None:
-            self.regex = regex
+        self.regex = regex
 
     def __call__(self, pth_img) -> np.ndarray:
         l_files = [f.split('_') for f in os.listdir(pth_img) if re.findall(self.regex, str(f))]

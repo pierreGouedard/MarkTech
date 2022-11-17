@@ -1,27 +1,28 @@
 """ Build features for training.
 
-for each financial time series, split signal according to time. At every instan in
-[t0, t0 + predict_interval, ..., t0 + N * predict_interval] we compute the features from data values that took the time
-series prior to that instant.
+for each financial time series, split signal according to time. At every instant in
+[t0, t0 + predict_interval, ..., t0 + N * predict_interval] we compute the features from values that took the time
+series prior to that instant. The backward interval is a free parameter.
 
 For each instant, the features computed are:
   ### full backward features
    -> deep representation of Gramian of past values of time series up to backward_interval (key=full_gram)
    -> deep representation of MTF of past values of time series up to backward_interval (key=full_mark)
    -> deep representation of ScatterT of past values of time series up to backward_interval (key=full_scat_[ordr])
+      [ordr in {0, 1, 2}]
 
   ### Segmented backward interval to produce sequence of features (controlled by params window_length & hop_size)
-  => deep representation of Gramian of past values of each past segment
-   -> Stored as sequence (2D) (key=seq_gram)
-   -> Stored as mean of (1D) (key=avg_gram)
+   => deep representation of Gramian of past values of each past segment
+    -> Stored as sequence (2D) (key=seq_gram)
+    -> Stored as mean of (1D) (key=avg_gram) => ON HOLD
 
-  => deep representation of MTF of each past segment
-   -> Stored as sequence (2D) (key=seq_mark)
-   -> Stored as mean of (1D) (key=avg_mark)
+   => deep representation of MTF of each past segment
+    -> Stored as sequence (2D) (key=seq_mark)
+    -> Stored as mean of (1D) (key=avg_mark) => ON HOLD
 
-  => deep representation of ScatterT of past values of each past segment
-   -> Stored as sequence (2D) (key=seq_scat_[ordr])
-   -> Stored as mean of (1D) (key=avg_scat_[ordr])
+   => ScatterT of past values of each past segment [ordr in {1, 2}]
+    -> Stored as sequence (2D) (key=seq_scat_[ordr])
+    -> Stored as mean of (1D) (key=avg_scat_[ordr]) => ON HOLD
 
 Store the result of processing in 02 - features.
 
@@ -42,7 +43,7 @@ sys.path.append(project_path.as_posix())
 
 # Local import
 from marktech.utils.temp import Temp
-from marktech.utils.dataclasses import FeatureMeta
+from marktech.utils.dataclasses import FeatureMeta, Labels
 from marktech.time_series.driver import TimeSeriesDriver
 from marktech.models.vgg import create_vgg_model, transform_image
 from marktech.time_series.features import compute_gramian_angular_field, compute_markov_transition_field, \
@@ -83,6 +84,36 @@ def compute_features(ts: TimeSeriesDriver, key: str):
         save((shared_tmp_dir.path / f'{key}_scat_2.npy').as_posix(), l_ts_scatter[2][:, 0])
 
     return True
+
+
+def compute_labels(data: pd.Series, dt_start: pd.Timestamp, n: int):
+
+    # Get future data
+    future_data = data.loc[data.index > dt_start].iloc[:n]
+
+    # In case not enough future data are available, return empty dict
+    if len(future_data) < n:
+        return {}
+
+    # Compute labels
+    high, curr = future_data.max(), data.loc[dt_start]
+    curr = data.loc[dt_start]
+    relative = (high - curr) / curr
+
+    return {
+        "is_up": high > curr, "is_down": high <= curr,
+        "is_up_1": 0 < relative <= 0.01, "is_down_1": 0 < -relative <= 0.01,
+        "is_up_2": 0.01 < relative <= 0.02, "is_down_2": 0.01 < -relative <= 0.02,
+        "is_up_3": 0.02 < relative <= 0.03, "is_down_3": 0.02 < -relative <= 0.03,
+        "is_up_4": 0.03 < relative <= 0.04, "is_down_4": 0.03 < -relative <= 0.04,
+        "is_up_5": 0.04 < relative <= 0.05, "is_down_5": 0.04 < -relative <= 0.05,
+        "is_up_6": 0.05 < relative <= 0.06, "is_down_6": 0.05 < -relative <= 0.06,
+        "is_up_7": 0.06 < relative <= 0.07, "is_down_7": 0.06 < -relative <= 0.07,
+        "is_up_8": 0.07 < relative <= 0.08, "is_down_8": 0.07 < -relative <= 0.08,
+        "is_up_9": 0.08 < relative <= 0.09, "is_down_9": 0.08 < -relative <= 0.09,
+        "is_up_10": 0.09 < relative, "is_down_10": 0.09 < -relative,
+        "next_max": high
+    }
 
 
 def seq_compute_features(ts: TimeSeriesDriver, key: str, image_size: int, pth: Path, J: int, Q: int):
@@ -136,11 +167,14 @@ if __name__ == '__main__':
     data_path = project_path / "data"
     raw_data_path = data_path / "01 - raw"
     pth_feature_out = data_path / "02 - features"
+    pth_meta = pth_feature_out / "meta.csv"
+    pth_labels = pth_feature_out / "labels.csv"
 
     # Parameters
     sampling_rate = 1 / 60  # sampled every 60s
     predict_interval = 60  # 60 minutes of existing
     backward_interval = 1026  # ~17H of existing data (~ must be a power of 2 for scatter transform)
+    forward_interval = 1026  # ~17H of existing data (~ must be a power of 2 for scatter transform)
     windows_length = 64  # 60 minutes of existing data (~ must be a power of 2 for scatter transform)
     hop_size = 64  # 60 minutes of existing data (~ must be a power of 2 for scatter transform)
     n_frame = 16  # 24H / 60 minutes
@@ -150,19 +184,17 @@ if __name__ == '__main__':
 
     # Init var
     vgg_model = create_vgg_model()
-    l_meta = []
+    l_meta, l_labels = [], []
+    if pth_meta.exists():
+        l_meta = pd.read_csv(pth_meta, index_col=None).to_dict(orient='records')
+    if pth_labels.exists():
+        l_labels = pd.read_csv(pth_labels, index_col=None).to_dict(orient='records')
 
     for filename in os.listdir(raw_data_path):
 
         # If already exists, continue otherwise, create feature dir
         key = str(filename).split('.')[0]
         pth_sub_out = pth_feature_out / key
-        if pth_sub_out.exists():
-            continue
-
-        # Create dir and log
-        pth_sub_out.mkdir()
-        print(f'Computing features for {key}')
 
         # Read audio
         ts_data = (
@@ -171,21 +203,45 @@ if __name__ == '__main__':
         )
 
         # Split file to create each sample
-        seg_inds = np.arange(backward_interval, len(ts_data.data), predict_interval)
         l_segments = [
-            (ts_data.segment_ind(t - backward_interval, t), str(i)) for i, t in enumerate(seg_inds)
+            (ts_data.segment_ind(t - backward_interval, t), str(i))
+            for i, t in enumerate(np.arange(backward_interval, len(ts_data.data), predict_interval))
         ]
 
         for (segment, sample_id) in l_segments:
+
+            # If path already exists or labels impossible to compute, pass
             pth_ssub_out = pth_sub_out / str(sample_id)
-            if pth_ssub_out.exists():
+            d_labels = compute_labels(ts_data.data, segment.data.index.max(), forward_interval)
+
+            if pth_ssub_out.exists() or not d_labels:
                 continue
 
-            # Create dir and log
+            # Create dirs
             pth_ssub_out.mkdir()
+            tmp_dir = Temp(
+                prefix=f'marktech_{key}_{sample_id}_', suffix='_ftrs', is_dir=True,
+                dir=(data_path / '06 - tmp').as_posix()
+            )
             print(f'Computing features for {key} - sample {sample_id}')
 
-            # Add meta about sample
+            # segment sample for seq feautres
+            l_sub_segments = [(segment, 'full')] + [
+                (segment.segment_ind(t - windows_length, t), str(j))
+                for j, t in enumerate(np.arange(windows_length, len(segment.data), windows_length))
+            ]
+
+            # Compute all features with multiprocessing.
+            with Pool(4, initializer=init_pool_worker, initargs=(tmp_dir, image_size, J, Q)) as p:
+                l_res = list(p.starmap(compute_features, l_sub_segments))
+
+            # Save final features
+            move_final_feature(vgg_model, tmp_dir.path, pth_ssub_out, n_frame)
+
+            # Clean tmp dir
+            tmp_dir.remove()
+
+            # Add meta & label about sample
             meta = FeatureMeta(
                 key=key,
                 id=int(sample_id),
@@ -194,26 +250,9 @@ if __name__ == '__main__':
                 is_test=segment.data.index.max() > tresh_date_test
             )
             l_meta.append(meta.__dict__)
+            label = Labels(key=key, id=sample_id, **d_labels)
+            l_labels.append(label.__dict__)
 
-            # Create tmp dir
-            tmp_dir = Temp(
-                prefix=f'marktech_{key}_{sample_id}_', suffix='_ftrs', is_dir=True,
-                dir=(data_path / '06 - tmp').as_posix()
-            )
-
-            # segment sample
-            seg_sub_inds = np.arange(windows_length, len(segment.data), windows_length)
-            l_sub_segments = [(segment, 'full')] + [
-                (segment.segment_ind(t - windows_length, t), str(j))
-                for j, t in enumerate(seg_sub_inds)
-            ]
-
-            # Compute all features for that sample.
-            with Pool(4, initializer=init_pool_worker, initargs=(tmp_dir, image_size, J, Q)) as p:
-                l_res = list(p.starmap(compute_features, l_sub_segments))
-
-            # Save final features
-            move_final_feature(vgg_model, tmp_dir.path, pth_ssub_out, n_frame)
-
-            # Save final vgg features
-            tmp_dir.remove()
+            # Backup feature Meta & labels
+            pd.DataFrame(l_meta).to_csv(pth_meta, index=False)
+            pd.DataFrame(l_labels).to_csv(pth_labels, index=False)

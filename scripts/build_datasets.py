@@ -21,8 +21,7 @@ project_path = Path(__file__).parent.parent
 sys.path.append(project_path.as_posix())
 
 # Local import
-from marktech.models.datasets import build_lld_full_datasets, build_lld_seq_datasets, build_vgg_full_datasets, \
-    build_vgg_seq_datasets
+from marktech.models.datasets import build_full_datasets, build_seq_datasets
 
 
 if __name__ == '__main__':
@@ -35,32 +34,34 @@ if __name__ == '__main__':
 
     # Parameters
     vgg_size = 4096
-    n_frame = 60
-    lld_dim = 133
-    downscale = 25
+    scat_0_size = 17
+    scat_1_size = 45
+    scat_2_size = 106
+    forward_interval = 1026
+    label_name = 'next_max'
+    n_frame = 16
 
-    # load raw metadata:
-    df_train_split = pd.concat(
-        [pd.read_csv(raw_metadata_path / "train_split.csv"), pd.read_csv(raw_metadata_path / "dev_split.csv")],
-        ignore_index=True
-    )
-    df_test_split = pd.read_csv(raw_metadata_path / "test_split.csv")
-    s_train_lbl = df_train_split.set_index('Participant_ID')['PHQ_Score'].astype(float) / downscale
-    s_test_lbl = df_test_split.set_index('Participant_ID')['PHQ_Score'].astype(float) / downscale
-
-    # Build lld datasets
-    build_lld_full_datasets(
-        features_path, dataset_path / 'lld_full', s_train_lbl, s_test_lbl, lld_dim
+    # load feature metadata:
+    df_meta = pd.read_csv(features_path / "meta.csv", index_col=None)
+    df_labels = (
+        pd.read_csv(features_path / "labels.csv", index_col=None)
+        .loc[:, ['key', 'id', label_name]]
+        .rename(columns={label_name: 'target'})
     )
 
-    build_lld_seq_datasets(
-        features_path, dataset_path / 'lld_seq', s_train_lbl, s_test_lbl, n_frame, lld_dim
-    )
+    # Build full datasets
+    l_full_features = [
+        ('gram', vgg_size), ('mark', vgg_size), ('scat_0', scat_0_size), ('scat_1', vgg_size),
+        ('scat_2', vgg_size),
+    ]
+    for (key, dim) in l_full_features:
+        build_full_datasets(features_path, dataset_path / f'full_{key}', df_meta, df_labels, key=key, dim=dim)
 
-    # Build vgg datasets
-    build_vgg_full_datasets(
-        features_path, dataset_path / 'vgg_full', s_train_lbl, s_test_lbl, vgg_size
-    )
-    build_vgg_seq_datasets(
-        features_path, dataset_path / 'vgg_seq', s_train_lbl, s_test_lbl, n_frame, vgg_size
-    )
+    # Build seq datasets
+    l_seq_features = [
+        ('gram', vgg_size), ('mark', vgg_size), ('scat_1', scat_1_size), ('scat_2', scat_2_size),
+    ]
+    for (key, dim) in l_seq_features:
+        build_seq_datasets(
+            features_path, dataset_path / f'seq_{key}', df_meta, df_labels, key=key, dim=dim, n_frame=n_frame
+        )

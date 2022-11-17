@@ -19,17 +19,16 @@ class TimeSeriesDriver:
     def duration(self) -> float:
         pass
 
-    def read(self, path: Path, utc_convert: bool = True):
+    def read(self, path: Path, utc_convert: bool = True, dayfirst: bool = True):
         # load time series
         data = pd.read_csv(path.as_posix())
-
         self.data = (
             data
-            .assign(**{self.time_col: pd.to_datetime(data[self.time_col])})
+            .assign(**{self.time_col: pd.to_datetime(data[self.time_col], dayfirst=dayfirst)})
             .loc[:, [self.time_col, self.value_col]]
             .set_index(self.time_col, drop=True)
             .loc[:, self.value_col]
-        )
+        ).sort_index()
         if utc_convert:
             self.data.index = self.data.index.tz_convert(pytz.utc)
 

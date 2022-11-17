@@ -1,85 +1,31 @@
 # utils module
-from typing import Dict, List, Callable, Any
-from copy import deepcopy as copy
-from dataclasses import dataclass
+from typing import List, Callable
 from pathlib import Path
 import threading
-import json
+import glob
 import os
 
 # Scientific module
-from random import shuffle, seed
 import tensorflow as tf
 import pandas as pd
 import numpy as np
 import gc
 
-
-@dataclass
-class DatasetMeta:
-    train_ind_tf2id: Dict[int, str] = None
-    train_ind_id2tf: Dict[str, int] = None
-    test_ind_tf2id: Dict[int, str] = None
-    test_ind_id2tf: Dict[str, int] = None
-    val_before: int = None
-    norm_data: np.ndarray = None
-    input_dim: Any = None
-
-    def copy(self):
-        return DatasetMeta(
-            copy(self.train_ind_tf2id), copy(self.train_ind_id2tf), copy(self.test_ind_tf2id),
-            copy(self.test_ind_id2tf), self.val_before, self.norm_data, copy(self.input_dim)
-        )
-
-    def init_mapping(self):
-        self.train_ind_tf2id, self.train_ind_id2tf = {}, {}
-        self.test_ind_tf2id, self.test_ind_id2tf = {}, {}
-        return self
-
-    def load(self, path: Path):
-        with open(path / 'map.json', 'r') as handle:
-            d_map = json.load(handle)
-
-        self.train_ind_tf2id = d_map['train_ind_tf2id']
-        self.train_ind_id2tf = d_map['train_ind_id2tf']
-        self.test_ind_tf2id = d_map['test_ind_tf2id']
-        self.test_ind_id2tf = d_map['test_ind_id2tf']
-        self.val_before = d_map['val_before']
-        self.input_dim = d_map['input_dim']
-
-        if (path / 'norm_data.npy').exists():
-            self.norm_data = np.load((path / 'norm_data.npy').as_posix())
-
-        return self
-
-    def save(self, path: Path):
-        path.mkdir()
-        with open(path / 'map.json', 'w') as handle:
-            json.dump(
-                {
-                    "train_ind_tf2id": self.train_ind_tf2id,
-                    "train_ind_id2tf": self.train_ind_id2tf,
-                    "test_ind_tf2id": self.test_ind_tf2id,
-                    "test_ind_id2tf": self.test_ind_id2tf,
-                    "val_before": self.val_before,
-                    "input_dim": self.input_dim,
-                }, handle
-            )
-        if self.norm_data is not None:
-            np.save((path / 'norm_data.npy').as_posix(), self.norm_data)
+# Local import
+from marktech.utils.dataclasses import DatasetMeta
 
 
 class PrepareDatasetThread(threading.Thread):
 
     def __init__(
-            self, l_dirs: List[str], load_func: Callable, train_labels: pd.Series,
-            test_labels: pd.Series, path_features: Path, key: str
+            self, l_dirs: List[str], load_func: Callable, df_meta: pd.DataFrame, df_labels: pd.DataFrame,
+            path_features: Path, key: str
     ):
         threading.Thread.__init__(self)
         self.dirs = l_dirs
         self.load_fn = load_func
-        self.train_labels = train_labels
-        self.test_labels = test_labels
+        self.raw_meta = df_meta
+        self.labels = df_labels
         self.path = path_features
         self.key = key
         self.res = None
@@ -88,24 +34,34 @@ class PrepareDatasetThread(threading.Thread):
         # Create Meta dataset
         ds_meta = DatasetMeta().init_mapping()
 
-        # Create train and test slices
+        # Create train and test empty slices
         l_train_feat, l_train_labels, n_train = [], [], 0
         l_test_feat, l_test_labels, n_test = [], [], 0
 
-        # DO it with multip
-        for i, filename in enumerate(self.dirs):
-            if int(filename) in self.train_labels.index:
-                l_train_feat.append(self.load_fn(self.path / str(filename) / self.key))
-                l_train_labels.append(self.train_labels[int(filename)])
-                ds_meta.train_ind_id2tf[filename] = n_train
-                ds_meta.train_ind_tf2id[n_train] = filename
+        #
+        for ids in list(glob.glob((self.path / '*/*').as_posix())):
+            [stk_key, sid] = Path(ids).relative_to(self.path).as_posix().split('/')
+
+            # Get from raw meta whether this is a test sample or not
+            is_test = self.raw_meta.loc[
+                (self.raw_meta.key == stk_key) & (self.raw_meta.id == int(sid)),
+                'is_test'
+            ].all()
+            label = self.labels.loc[
+                (self.labels.key == stk_key) & (self.labels.id == int(sid)),
+                'target'
+            ].iloc[0]
+
+            if not is_test:
+                l_train_feat.append(self.load_fn(self.path / stk_key / sid / self.key))
+                l_train_labels.append(label)
+                ds_meta.train_tf2id[n_train] = {"key": stk_key, "id": sid}
                 n_train += 1
 
-            elif int(filename) in self.test_labels.index:
-                l_test_feat.append(self.load_fn(self.path / str(filename) / self.key))
-                l_test_labels.append(self.test_labels[int(filename)])
-                ds_meta.test_ind_id2tf[filename] = n_test
-                ds_meta.test_ind_tf2id[n_test] = filename
+            else:
+                l_test_feat.append(self.load_fn(self.path / stk_key / sid / self.key))
+                l_test_labels.append(label)
+                ds_meta.test_tf2id[n_test] = {"key": stk_key, "id": sid}
                 n_test += 1
 
         self.res = {
@@ -116,19 +72,15 @@ class PrepareDatasetThread(threading.Thread):
 
 
 def generic_build_ds(
-        pth_features: Path, save_path: Path, s_train_labels: pd.Series, s_test_labels: pd.Series,
+        pth_features: Path, save_path: Path, df_meta: pd.DataFrame, df_labels: pd.DataFrame,
         key: str, load_fn: Callable, use_normalisation: bool = False
 ) -> DatasetMeta:
 
     # List dirs and shuffle
     l_dirs = os.listdir(pth_features)
-    seed(123)
-    shuffle(l_dirs)
 
     # Launch preparation of dataset
-    prepare_thread = PrepareDatasetThread(
-        l_dirs, load_fn, s_train_labels, s_test_labels, pth_features, key
-    )
+    prepare_thread = PrepareDatasetThread(l_dirs, load_fn, df_meta, df_labels, pth_features, key)
     prepare_thread.start()
     prepare_thread.join()
 
@@ -138,7 +90,7 @@ def generic_build_ds(
 
     # Build datasets
     n_samples = ax_train_feat.shape[0]
-    ds_meta.val_before = int(n_samples * 0.1)
+    ds_meta.val_before = int(n_samples * 0.05)
 
     if use_normalisation:
         ds_meta.norm_data = np.stack(ax_train_feat[ds_meta.val_before:])
@@ -171,69 +123,39 @@ def generic_build_ds(
     return ds_meta
 
 
-def build_lld_full_datasets(
-        pth_features: Path, save_path: Path, s_train_labels: pd.Series, s_test_labels: pd.Series, lld_dim: int
+def build_full_datasets(
+        pth_features: Path, save_path: Path, df_meta: pd.DataFrame, df_labels: pd.DataFrame,
+        key: str, dim: int
 ) -> None:
 
-    def load_llds(pth: Path):
-        return np.load(pth.as_posix())
+    def load(pth: Path):
+        ax_feat = np.load(pth.as_posix())
+        if len(ax_feat.shape) > 1:
+            return ax_feat[0]
+        return ax_feat
 
     save_path.mkdir()
     meta_ds = generic_build_ds(
-        pth_features, save_path, s_train_labels, s_test_labels,  key='full_lld.npy', load_fn=load_llds,
+        pth_features, save_path, df_meta, df_labels, key=f'full_{key}.npy', load_fn=load,
         use_normalisation=True
     )
     # Save meta
-    meta_ds.input_dim = (lld_dim,)
+    meta_ds.input_dim = (dim,)
     meta_ds.save(save_path / 'meta')
 
 
-def build_lld_seq_datasets(
-        pth_features: Path, save_path: Path, s_train_labels: pd.Series, s_test_labels: pd.Series, n_frame: int,
-        lld_dim: int
+def build_seq_datasets(
+        pth_features: Path, save_path: Path, df_meta: pd.DataFrame, df_labels: pd.DataFrame,
+        key: str, n_frame: int, dim: int
 ) -> None:
 
-    def load_lld_seq(pth: Path):
+    def load(pth: Path):
         return np.load(pth.as_posix())
 
     meta_ds = generic_build_ds(
-        pth_features, save_path, s_train_labels, s_test_labels,  key='seq_lld.npy', load_fn=load_lld_seq,
+        pth_features, save_path, df_meta, df_labels, key=f'seq_{key}.npy', load_fn=load,
         use_normalisation=True
     )
     # Save meta
-    meta_ds.input_dim = (n_frame, lld_dim)
-    meta_ds.save(save_path / 'meta')
-
-
-def build_vgg_full_datasets(
-        pth_features: Path, save_path: Path, s_train_labels: pd.Series, s_test_labels: pd.Series, input_dim: int
-) -> None:
-
-    def load_vgg(pth: Path):
-        return np.load(pth.as_posix())[0, :]
-
-    meta_ds = generic_build_ds(
-        pth_features, save_path, s_train_labels, s_test_labels,  key='full_vgg.npy',
-        load_fn=load_vgg, use_normalisation=True
-    )
-
-    # Save meta
-    meta_ds.input_dim = (input_dim,)
-    meta_ds.save(save_path / 'meta')
-
-
-def build_vgg_seq_datasets(
-        pth_features: Path, save_path: Path, s_train_labels: pd.Series, s_test_labels: pd.Series, n_frame: int,
-        input_dim: int
-) -> None:
-
-    def load_vgg_seq(pth: Path):
-        return np.load(pth.as_posix())
-
-    meta_ds = generic_build_ds(
-        pth_features, save_path, s_train_labels, s_test_labels,  key='seq_vgg.npy',
-        load_fn=load_vgg_seq, use_normalisation=True
-    )
-    # Save meta
-    meta_ds.input_dim = (n_frame, input_dim)
+    meta_ds.input_dim = (n_frame, dim)
     meta_ds.save(save_path / 'meta')

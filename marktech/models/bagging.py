@@ -5,7 +5,7 @@ from sklearn.metrics import accuracy_score, roc_curve, auc, confusion_matrix, me
 import numpy as np
 
 # Local import
-from marktech.utils.grid_search import ccc
+from marktech.search.grid_search import ccc
 
 
 class BaggingModel:

@@ -1,9 +1,5 @@
 params:
-  batch_size: 10
-  learning_rate: 0.000001
   nb_epoch: 50
-  attention: False
-  sigmoid_last: False
 
 grid_params:
   batch_size:
@@ -14,6 +10,9 @@ grid_params:
     - 0.000001
     - 0.00005
     - 0.0005
+  attention:
+    - True
+    - False
   dropout:
     -
     - 0.2

@@ -1,12 +1,5 @@
 params:
-  batch_size: 10
-  learning_rate: 0.000001
   nb_epoch: 50
-  n_kernels: 150
-  kernel_size: 3
-  attention: False
-  dropout: 0.2
-  sigmoid_last: False
 
 grid_params:
   batch_size:
@@ -24,6 +17,9 @@ grid_params:
     - 3
     - 2
     - 1
+  attention:
+    - True
+    - False
   dropout:
     -
     - 0.2

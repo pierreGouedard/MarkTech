@@ -38,7 +38,7 @@ if __name__ == '__main__':
     scat_1_size = 45
     scat_2_size = 106
     forward_interval = 1026
-    label_name = 'next_max'
+    label_name = 'next_max_relative'
     n_frame = 16
 
     # load feature metadata:
@@ -55,6 +55,9 @@ if __name__ == '__main__':
         ('scat_2', vgg_size),
     ]
     for (key, dim) in l_full_features:
+        if (dataset_path / f'full_{key}').exists():
+            continue
+
         build_full_datasets(features_path, dataset_path / f'full_{key}', df_meta, df_labels, key=key, dim=dim)
 
     # Build seq datasets
@@ -62,6 +65,9 @@ if __name__ == '__main__':
         ('gram', vgg_size), ('mark', vgg_size), ('scat_1', scat_1_size), ('scat_2', scat_2_size),
     ]
     for (key, dim) in l_seq_features:
+        if (dataset_path / f'seq_{key}').exists():
+            continue
+        
         build_seq_datasets(
             features_path, dataset_path / f'seq_{key}', df_meta, df_labels, key=key, dim=dim, n_frame=n_frame
         )

@@ -11,16 +11,15 @@ from .datasets import DatasetMeta
 
 
 class TfModelFull:
-    """Predict PHQ-8 scores indicating depression from 1D feature."""
+    """Fully connected nn."""
 
     def __init__(
             self, meta_dataset: DatasetMeta, learning_rate: float, nb_epoch: int, batch_size: int = 32,
-            threshold: float = 0.5, dropout: float = None, sigmoid_last: bool = True,
-            network: Optional[tf.keras.Model] = None
+            threshold: float = 0.5, dropout: float = None, network: Optional[tf.keras.Model] = None
     ):
         # training params
         self.learning_rate, self.nb_epoch, self.batch_size = learning_rate, nb_epoch, batch_size
-        self.dropout, self.sigmoid_last = dropout, sigmoid_last
+        self.dropout = dropout
         self.optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
 
         # Meta inputs
@@ -30,7 +29,6 @@ class TfModelFull:
         if network is None:
             self.network = self.__create_network(
                 self.meta_dataset.input_dim, self.meta_dataset.norm_data, self.dropout,
-                self.sigmoid_last
             )
             self.network.compile(optimizer=self.optimizer, loss=tf.keras.losses.MeanSquaredError())
         else:
@@ -59,7 +57,7 @@ class TfModelFull:
     def to_dict(self):
         return {
             'learning_rate': self.learning_rate, 'batch_size': self.batch_size, 'nb_epoch': self.nb_epoch,
-            'threshold': self.threshold, 'dropout': self.dropout, 'sigmoid_last': self.sigmoid_last
+            'threshold': self.threshold, 'dropout': self.dropout
         }
 
     def save(self, path_dir: Path):
@@ -76,7 +74,7 @@ class TfModelFull:
 
     @staticmethod
     def __create_network(
-            input_dim: Tuple[int, int], norm_data: np.ndarray, dropout: float, sigmoid_last: bool
+            input_dim: Tuple[int, int], norm_data: np.ndarray, dropout: float
     ) -> tf.keras.Model:
         """Create forward network.
 
@@ -105,10 +103,6 @@ class TfModelFull:
         # 2nd dense FC layer
         X = tf.keras.layers.Dense(int(input_dim[0] / 4), name='hidden_layer_2', activation="relu")(X)
 
-        # End with a sigmoid output layer
-        if sigmoid_last:
-            X = tf.keras.layers.Dense(1, name='output_layer', activation='sigmoid')(X)
-
         network = tf.keras.Model(inputs=X_input, outputs=X, name='model_avg_lld')
 
         return network
@@ -135,7 +129,7 @@ class TfModelFull:
 
         # fit the model
         self.history = self.network.fit(
-            train_dataset, validation_data=val_dataset, epochs=self.nb_epoch, callbacks=[lr, es], verbose=0
+            train_dataset, validation_data=val_dataset, epochs=self.nb_epoch, callbacks=[lr, es], verbose=1
         )
 
         if show_eval:

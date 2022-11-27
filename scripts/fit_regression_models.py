@@ -37,28 +37,37 @@ from tensorflow.python.data import Dataset
 # Local import
 from marktech.models.datasets import DatasetMeta
 from marktech.models.tf_full import TfModelFull
-from marktech.models.tf_seq import TfModelSeq
+from marktech.models.tf_conv import TfModelConv
 from marktech.models.tf_gru import TfModelGRU
 from marktech.models.xgb_full import XGBRegressor
-from marktech.utils.grid_search import tf_grid_search, xgb_grid_search
+from marktech.search.grid_search import grid_search
+from marktech.search.hp_search import run_hp_search
 
 
-class TrainingArgParser(argparse.ArgumentParser):
+class FittingArgParser(argparse.ArgumentParser):
     def __init__(self):
-        super().__init__(description="Arg parser for Heka task updating.")
+        super().__init__(description="Arg parser for fitting models.")
         self.add_argument(
             "--dataset",
             metavar="dataset",
-            default="vgg_seq",
+            default="seq_gram",
             type=str,
-            help="Name of dataset to use for training: {lld_full, lld_seq, vgg_full, vgg_seq}",
+            help="Name of dataset to use for training: {full_gram, seq_gram, full_mark, seq_mark, full_scat_1, "
+                 "seq_scat_1, full_scat_2, seq_scat_2, full_scat_0}",
         )
         self.add_argument(
             "--model",
             metavar="model",
-            default="tf",
+            default="conv",
             type=str,
-            help="Name of model to use for training: {tf, xgb}",
+            help="Name of model to use for training: {conv, fc, gru, xgb}",
+        )
+        self.add_argument(
+            "--search",
+            metavar="search",
+            default="hpsearch",
+            type=str,
+            help="Name of search to perform: {hpsearch, gridsearch}",
         )
 
 
@@ -68,7 +77,7 @@ def load_training_datasets(dataset_path: Path) -> Tuple[Dataset, Dataset, Datase
     ds_meta = DatasetMeta().load(dataset_path / "meta")
 
     return ds_train, ds_test, ds_meta
-
+    
 
 if __name__ == '__main__':
     # Get project path
@@ -77,48 +86,49 @@ if __name__ == '__main__':
     dataset_path = data_path / "03 - datasets"
     param_path = project_path / "config" / "global"
     model_path = data_path / "04 - models"
-    gridsearch_path = data_path / "05 - gridsearch"
+    search_path = data_path / "05 - search"
 
     # Parse args
-    args = TrainingArgParser().parse_args()
+    args = FittingArgParser().parse_args()
+
+    # Parameters
+    weights = (1, 0.5)
 
     # Get dataset
-    if args.dataset == 'lld_full':
-        ds_train, ds_test, ds_meta = load_training_datasets(dataset_path / 'lld_full')
-        param_file = "gs_tf_full_params.yaml" if args.model == 'tf' else "gs_xgb_full_params.yaml"
+    if 'full' in args.dataset:
+        ds_train, ds_test, ds_meta = load_training_datasets(dataset_path / args.dataset)
+        param_file = "gs_tf_full_params.yaml" if args.model == 'fc' else "gs_xgb_full_params.yaml"
         d_params = yaml.safe_load((param_path / param_file).open())
-        mdl = TfModelFull if args.model in ['tf', 'gru'] else XGBRegressor
+        mdl = TfModelFull if args.model == 'fc' else XGBRegressor
 
-    elif args.dataset == 'vgg_full':
-        ds_train, ds_test, ds_meta = load_training_datasets(dataset_path / 'vgg_full')
-        param_file = "gs_tf_full_params.yaml" if args.model == 'tf' else "gs_xgb_full_params.yaml"
+    elif 'seq' in args.dataset:
+        ds_train, ds_test, ds_meta = load_training_datasets(dataset_path / args.dataset)
+        param_file = "gs_tf_conv_params.yaml" if args.model == 'conv' else "gs_tf_gru_params.yaml"
         d_params = yaml.safe_load((param_path / param_file).open())
-        mdl = TfModelFull if args.model in ['tf', 'gru'] else XGBRegressor
-
-    elif args.dataset == 'lld_seq':
-        ds_train, ds_test, ds_meta = load_training_datasets(dataset_path / 'lld_seq')
-        param_file = "gs_tf_seq_params.yaml" if args.model == 'tf' else "gs_tf_gru_params.yaml"
-        d_params = yaml.safe_load((param_path / param_file).open())
-        mdl = TfModelSeq if args.model == 'tf' else TfModelGRU
-
-    elif args.dataset == 'vgg_seq':
-        ds_train, ds_test, ds_meta = load_training_datasets(dataset_path / 'vgg_seq')
-        param_file = "gs_tf_seq_params.yaml" if args.model == 'tf' else "gs_tf_gru_params.yaml"
-        d_params = yaml.safe_load((param_path / param_file).open())
-        mdl = TfModelSeq if args.model == 'tf' else TfModelGRU
+        mdl = TfModelConv if args.model == 'conv' else TfModelGRU
 
     else:
         raise ValueError(f'Unknown dataset: {args.dataset}')
 
-    if args.model in ['tf', 'gru']:
-        best_model, d_info = tf_grid_search(
-            mdl, ds_meta, ds_train, ds_test, d_params['params'], d_params['grid_params'],
-            gridsearch_path / f'gs_{args.model}_{args.dataset}.yaml', model_path / f'{args.model}_{args.dataset}'
-        )
-    else:
+    if args.model not in ['conv', 'gru']:
         if 'seq' in args.dataset:
             raise ValueError('cannot use Xgboost for sequence dataset')
-        best_model, d_info = xgb_grid_search(
-            mdl, ds_train, ds_test, d_params['params'], d_params['grid_params'],
+
+    if args.search == "gridsearch":
+        gridsearch_path = search_path / 'grid'
+        if not gridsearch_path.exists():
+            gridsearch_path.mkdir()
+
+        best_model, d_info = grid_search(
+            mdl, ds_meta, ds_train, ds_test, weights, d_params['params'], d_params['grid_params'],
             gridsearch_path / f'gs_{args.model}_{args.dataset}.yaml', model_path / f'{args.model}_{args.dataset}'
+        )
+    elif args.search == 'hpsearch':
+        hpsearch_path = search_path / 'hp'
+        if not hpsearch_path.exists():
+            hpsearch_path.mkdir()
+
+        trials, best_params = run_hp_search(
+            mdl, ds_meta, ds_train, ds_test, weights, d_params['params'], d_params['grid_params'],
+            hpsearch_path / f'gs_{args.model}_{args.dataset}.yaml'
         )

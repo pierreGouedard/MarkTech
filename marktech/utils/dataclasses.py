@@ -42,25 +42,32 @@ class Labels:
     is_down_9: bool
     is_down_10: bool
     next_max: float
+    next_max_relative: float
+    next_min: float
+    next_min_relative: float
 
 
 @dataclass
 class DatasetMeta:
     train_tf2id: Dict[int, Dict[str, str]] = None
+    train_id2tf: Dict[str, int] = None
     test_tf2id: Dict[int, Dict[str, str]] = None
+    test_id2tf: Dict[str, int] = None
     val_before: int = None
     norm_data: np.ndarray = None
     input_dim: Any = None
 
     def copy(self):
         return DatasetMeta(
-            copy(self.train_tf2id), copy(self.test_tf2id),
+            copy(self.train_tf2id), copy(self.train_id2tf), copy(self.test_tf2id), copy(self.test_id2tf),
             self.val_before, self.norm_data, copy(self.input_dim)
         )
 
     def init_mapping(self):
         self.train_tf2id = {}
+        self.train_id2tf = {}
         self.test_tf2id = {}
+        self.test_id2tf = {}
         return self
 
     def load(self, path: Path):
@@ -69,6 +76,8 @@ class DatasetMeta:
 
         self.train_tf2id = d_map['train_tf2id']
         self.test_tf2id = d_map['test_tf2id']
+        self.train_id2tf = d_map['train_id2tf']
+        self.test_id2tf = d_map['test_id2tf']
         self.val_before = d_map['val_before']
         self.input_dim = d_map['input_dim']
 
@@ -83,7 +92,9 @@ class DatasetMeta:
             json.dump(
                 {
                     "train_tf2id": self.train_tf2id,
+                    "train_id2tf": self.train_tf2id,
                     "test_tf2id": self.test_tf2id,
+                    "test_id2tf": self.test_tf2id,
                     "val_before": self.val_before,
                     "input_dim": self.input_dim,
                 }, handle

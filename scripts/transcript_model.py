@@ -24,7 +24,7 @@ import pandas as pd
 # Local model import
 from marktech.models.tf_seq import TfModelSeq
 from marktech.models.xgb_full import XGBRegressor
-from marktech.utils.grid_search import tf_grid_search, xgb_grid_search
+from marktech.search.grid_search import tf_grid_search, xgb_grid_search
 
 
 # Local util import

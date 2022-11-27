@@ -96,23 +96,24 @@ def compute_labels(data: pd.Series, dt_start: pd.Timestamp, n: int):
         return {}
 
     # Compute labels
-    high, curr = future_data.max(), data.loc[dt_start]
+    high, low, curr = future_data.max(), future_data.min(), data.loc[dt_start]
     curr = data.loc[dt_start]
-    relative = (high - curr) / curr
+    high_relative, low_relative = (high - curr) / curr, (low - curr) / curr
+
 
     return {
-        "is_up": high > curr, "is_down": high <= curr,
-        "is_up_1": 0 < relative <= 0.01, "is_down_1": 0 < -relative <= 0.01,
-        "is_up_2": 0.01 < relative <= 0.02, "is_down_2": 0.01 < -relative <= 0.02,
-        "is_up_3": 0.02 < relative <= 0.03, "is_down_3": 0.02 < -relative <= 0.03,
-        "is_up_4": 0.03 < relative <= 0.04, "is_down_4": 0.03 < -relative <= 0.04,
-        "is_up_5": 0.04 < relative <= 0.05, "is_down_5": 0.04 < -relative <= 0.05,
-        "is_up_6": 0.05 < relative <= 0.06, "is_down_6": 0.05 < -relative <= 0.06,
-        "is_up_7": 0.06 < relative <= 0.07, "is_down_7": 0.06 < -relative <= 0.07,
-        "is_up_8": 0.07 < relative <= 0.08, "is_down_8": 0.07 < -relative <= 0.08,
-        "is_up_9": 0.08 < relative <= 0.09, "is_down_9": 0.08 < -relative <= 0.09,
-        "is_up_10": 0.09 < relative, "is_down_10": 0.09 < -relative,
-        "next_max": high
+        "is_up": high > curr, "is_down": low <= curr,
+        "is_up_1": 0 < high_relative <= 0.01, "is_down_1": 0 < -low_relative <= 0.01,
+        "is_up_2": 0.01 < high_relative <= 0.02, "is_down_2": 0.01 < -low_relative <= 0.02,
+        "is_up_3": 0.02 < high_relative <= 0.03, "is_down_3": 0.02 < -low_relative <= 0.03,
+        "is_up_4": 0.03 < high_relative <= 0.04, "is_down_4": 0.03 < -low_relative <= 0.04,
+        "is_up_5": 0.04 < high_relative <= 0.05, "is_down_5": 0.04 < -low_relative <= 0.05,
+        "is_up_6": 0.05 < high_relative <= 0.06, "is_down_6": 0.05 < -low_relative <= 0.06,
+        "is_up_7": 0.06 < high_relative <= 0.07, "is_down_7": 0.06 < -low_relative <= 0.07,
+        "is_up_8": 0.07 < high_relative <= 0.08, "is_down_8": 0.07 < -low_relative <= 0.08,
+        "is_up_9": 0.08 < high_relative <= 0.09, "is_down_9": 0.08 < -low_relative <= 0.09,
+        "is_up_10": 0.09 < high_relative, "is_down_10": 0.09 < -low_relative,
+        "next_max": high, "next_max_relative": high_relative, "next_min": low, "next_min_relative": low_relative
     }
 
 
@@ -171,6 +172,7 @@ if __name__ == '__main__':
     pth_labels = pth_feature_out / "labels.csv"
 
     # Parameters
+    compute_only_meta = True  # Decide whether features should be computed or only meta.
     sampling_rate = 1 / 60  # sampled every 60s
     predict_interval = 60  # 60 minutes of existing
     backward_interval = 1026  # ~17H of existing data (~ must be a power of 2 for scatter transform)
@@ -197,10 +199,14 @@ if __name__ == '__main__':
         pth_sub_out = pth_feature_out / key
 
         # Read audio
-        ts_data = (
-            TimeSeriesDriver(time_col='Local time', value_col='Open', sr=sampling_rate)
-            .read(raw_data_path / str(filename))
-        )
+        try:
+            ts_data = (
+                TimeSeriesDriver(time_col='Local time', value_col='Open', sr=sampling_rate)
+                .read(raw_data_path / str(filename))
+            )
+        except:
+            import IPython
+            IPython.embed()
 
         # Split file to create each sample
         l_segments = [
@@ -214,32 +220,41 @@ if __name__ == '__main__':
             pth_ssub_out = pth_sub_out / str(sample_id)
             d_labels = compute_labels(ts_data.data, segment.data.index.max(), forward_interval)
 
-            if pth_ssub_out.exists() or not d_labels:
+            if not d_labels:
                 continue
 
-            # Create dirs
-            pth_ssub_out.mkdir()
-            tmp_dir = Temp(
-                prefix=f'marktech_{key}_{sample_id}_', suffix='_ftrs', is_dir=True,
-                dir=(data_path / '06 - tmp').as_posix()
-            )
-            print(f'Computing features for {key} - sample {sample_id}')
+            if not compute_only_meta:
+                if pth_ssub_out.exists():
+                    continue
 
-            # segment sample for seq feautres
-            l_sub_segments = [(segment, 'full')] + [
-                (segment.segment_ind(t - windows_length, t), str(j))
-                for j, t in enumerate(np.arange(windows_length, len(segment.data), windows_length))
-            ]
+                # Create dirs
+                pth_ssub_out.mkdir(parents=True)
+                tmp_dir = Temp(
+                    prefix=f'marktech_{key}_{sample_id}_', suffix='_ftrs', is_dir=True,
+                    dir=(data_path / '06 - tmp').as_posix()
+                )
+                print(f'Computing features for {key} - sample {sample_id}')
 
-            # Compute all features with multiprocessing.
-            with Pool(4, initializer=init_pool_worker, initargs=(tmp_dir, image_size, J, Q)) as p:
-                l_res = list(p.starmap(compute_features, l_sub_segments))
+                # segment sample for seq features
+                l_sub_segments = [(segment, 'full')] + [
+                    (segment.segment_ind(t - windows_length, t), str(j))
+                    for j, t in enumerate(np.arange(windows_length, len(segment.data), windows_length))
+                ]
 
-            # Save final features
-            move_final_feature(vgg_model, tmp_dir.path, pth_ssub_out, n_frame)
+                # Compute all features with multiprocessing.
+                with Pool(4, initializer=init_pool_worker, initargs=(tmp_dir, image_size, J, Q)) as p:
+                    l_res = list(p.starmap(compute_features, l_sub_segments))
 
-            # Clean tmp dir
-            tmp_dir.remove()
+                # Save final features
+                move_final_feature(vgg_model, tmp_dir.path, pth_ssub_out, n_frame)
+
+                # Clean tmp dir
+                tmp_dir.remove()
+
+            else:
+                # If meta only, add ony if feature's has been computed
+                if not pth_ssub_out.exists():
+                    continue
 
             # Add meta & label about sample
             meta = FeatureMeta(

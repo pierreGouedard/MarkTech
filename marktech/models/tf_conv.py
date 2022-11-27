@@ -44,17 +44,16 @@ class CustomAttention(tf.keras.layers.Layer):
         return context
 
 
-class TfModelSeq:
-    """Predict PHQ-8 scores indicating depression from sequence of features."""
+class TfModelConv:
 
     def __init__(
             self, meta_dataset: DatasetMeta, n_kernels: int, kernel_size: int,
             learning_rate: float, nb_epoch: int, batch_size: int = 32, dropout: float = None,
-            sigmoid_last: bool = True, attention: bool = True, network: Optional[tf.keras.Model] = None
+            attention: bool = True, network: Optional[tf.keras.Model] = None
     ):
         # training params
         self.learning_rate, self.nb_epoch, self.batch_size = learning_rate, nb_epoch, batch_size
-        self.dropout, self.sigmoid_last, self.attention = dropout, sigmoid_last, attention
+        self.dropout, self.attention = dropout, attention
         self.optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
 
         # Meta inputs
@@ -67,7 +66,7 @@ class TfModelSeq:
         if network is None:
             self.network = self.__create_network(
                 self.n_kernels, self.kernel_size, self.meta_dataset.input_dim, self.meta_dataset.norm_data,
-                self.dropout, self.sigmoid_last, self.attention
+                self.dropout, self.attention
             )
             self.network.compile(optimizer=self.optimizer, loss=tf.keras.losses.MeanSquaredError())
         else:
@@ -78,7 +77,7 @@ class TfModelSeq:
 
     @staticmethod
     def from_dict(d_params: Dict[str, Any], meta_dataset: DatasetMeta, network: Optional[tf.keras.Model] = None):
-        return TfModelSeq(meta_dataset, network=network, **d_params)
+        return TfModelConv(meta_dataset, network=network, **d_params)
 
     @staticmethod
     def load(path_dir: Path):
@@ -90,13 +89,13 @@ class TfModelSeq:
         # Load Keras model
         network = tf.keras.models.load_model(path_dir / 'network')
 
-        return TfModelSeq(**{**d_params, 'network': network, 'meta_dataset': meta_ds})
+        return TfModelConv(**{**d_params, 'network': network, 'meta_dataset': meta_ds})
 
     def to_dict(self):
         return {
             'n_kernels': self.n_kernels, 'kernel_size': self.kernel_size, 'learning_rate': self.learning_rate,
             'batch_size': self.batch_size, 'nb_epoch': self.nb_epoch, 'dropout': self.dropout,
-            'sigmoid_last': self.sigmoid_last, 'attention': self.attention
+            'attention': self.attention
         }
 
     def save(self, path_dir: Path):
@@ -114,7 +113,7 @@ class TfModelSeq:
     @staticmethod
     def __create_network(
             n_kernels: int, kernel_size: int, input_dim: Tuple[int, int], norm_data: np.ndarray, dropout: float,
-            sigmoid_last: bool, attention: bool
+            attention: bool
     ) -> tf.keras.Model:
         """Create forward network.
 
@@ -154,16 +153,13 @@ class TfModelSeq:
         X = tf.keras.layers.Dense(int(n_kernels / 4), name='hidden_dense_layer_2', activation="relu")(X)
 
         # End with a sigmoid output layer
-        if sigmoid_last:
-            X = tf.keras.layers.Dense(1, name='output_layer', activation='sigmoid')(X)
-
         network = tf.keras.Model(inputs=X_input, outputs=X, name='model_seq_lld')
 
         return network
 
     def fit(
             self, train_datasets: tf.data.Dataset, show_eval: bool = False
-    ) -> 'TfModelSeq':
+    ) -> 'TfModelConv':
         """
         Fit network using early stopping on validation dataset.
 
@@ -183,7 +179,7 @@ class TfModelSeq:
 
         # fit the model
         self.history = self.network.fit(
-            train_dataset, validation_data=val_dataset, epochs=self.nb_epoch, callbacks=[lr, es], verbose=0
+            train_dataset, validation_data=val_dataset, epochs=self.nb_epoch, callbacks=[lr, es], verbose=1
         )
 
         if show_eval:

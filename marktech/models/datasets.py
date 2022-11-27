@@ -56,12 +56,15 @@ class PrepareDatasetThread(threading.Thread):
                 l_train_feat.append(self.load_fn(self.path / stk_key / sid / self.key))
                 l_train_labels.append(label)
                 ds_meta.train_tf2id[n_train] = {"key": stk_key, "id": sid}
+                ds_meta.train_id2tf[f'{stk_key}_{sid}'] = n_train
                 n_train += 1
 
             else:
                 l_test_feat.append(self.load_fn(self.path / stk_key / sid / self.key))
                 l_test_labels.append(label)
                 ds_meta.test_tf2id[n_test] = {"key": stk_key, "id": sid}
+                ds_meta.test_id2tf[f'{stk_key}_{sid}'] = n_train
+
                 n_test += 1
 
         self.res = {

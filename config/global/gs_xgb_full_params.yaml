@@ -1,32 +1,24 @@
 params:
-  min_child_weight: 1
   nthread: 8
+  n_estimators: 300
 
 grid_params:
+  min_child_weight:
+    - 1
+    - 10
+    - 20
   learning_rate:
     - 0.01
-    - 0.05
     - 0.1
-    - 0.2
-    - 0.3
     - 0.5
-  n_estimators:
-    - 300
-    - 200
-    - 100
   max_depth:
     - 1
     - 2
-    - 3
     - 4
-    - 5
-    - 6
   subsample:
-    - 0.5
     - 0.8
     - 1.0
   colsample_bytree:
-    - 0.3
     - 0.5
     - 0.8
     - 1.0

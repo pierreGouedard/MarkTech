@@ -1,5 +1,6 @@
 # Global import
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+from scipy.stats import pearsonr
 from typing import Dict, Tuple, Union, Any
 from tensorflow.python.data import Dataset
 from pathlib import Path
@@ -51,6 +52,10 @@ def evaluate(
     r2_train = r2_score(y_train, y_hat_train)
     r2_test = r2_score(y_test, y_hat_test)
 
+    # Pearson correlation
+    pearsonr_train = pearsonr(y_train, y_hat_train).statistic
+    pearsonr_test = pearsonr(y_test, y_hat_test).statistic
+
     # Weighted mean square error
     ax_weights = ((y_train - y_hat_train) < 0) * weights[0] + ((y_train - y_hat_train) >= 0) * weights[1]
     wmse_train = mean_squared_error(y_hat_train, y_train, sample_weight=ax_weights, squared=False)
@@ -69,6 +74,8 @@ def evaluate(
         'test_mae': round(float(mae_test), 3),
         'r2_train': round(float(r2_train), 3),
         'r2_test': round(float(r2_test), 3),
+        'pearsonr_train': round(float(pearsonr_train), 3),
+        'pearsonr_test': round(float(pearsonr_test), 3),
         'train_wmse': round(float(wmse_train), 3),
         'test_wmse': round(float(wmse_test), 3),
         'train_ccc': round(float(ccc_train), 3),

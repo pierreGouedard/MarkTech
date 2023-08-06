@@ -1,18 +1,16 @@
 params:
-  nb_epoch: 50
+  nb_epoch: 100
+  n_kernels: 400
 
 grid_params:
   batch_size:
-    - 30
-    - 20
-    - 10
-  learning_rate:
-    - 0.000001
-    - 0.00005
-    - 0.0005
-  n_kernels:
     - 200
     - 100
+    - 50
+  learning_rate:
+    - 0.0000001
+    - 0.000001
+    - 0.00005
   kernel_size:
     - 3
     - 2
